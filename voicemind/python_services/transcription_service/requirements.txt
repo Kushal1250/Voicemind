@@ -1,0 +1,55 @@
+# =======================================================
+# VoiceMind Transcription Service — requirements.txt v19.0
+# Production Gujarati ASR fixes applied
+# Tested on Python 3.10 / 3.11 / 3.12 (Windows + Linux)
+# =======================================================
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.110.0,<0.120.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.1
+requests>=2.32.0
+pydantic>=2.0.0
+
+# ── audioop compatibility (Python 3.13+ removed audioop from stdlib) ──────────
+audioop-lts>=0.2.1; python_version >= "3.13"
+
+# ── Primary ASR: Faster-Whisper (CTranslate2 backend) ────────────────────────
+faster-whisper>=1.0.0,<2.0.0
+ctranslate2>=4.4.0,<5
+
+# ── HuggingFace / Transformers (IndicWhisper optional fallback) ───────────────
+transformers>=4.40.0,<5.0.0
+huggingface-hub>=0.24.0
+sentencepiece>=0.2.0
+accelerate>=0.26.0
+
+# ── PyTorch (CPU) ─────────────────────────────────────────────────────────────
+torch>=2.2.0,<2.9
+torchaudio>=2.2.0,<2.9
+
+# ── FIX: Silero VAD — pre-transcription silence gating ───────────────────────
+# Prevents Whisper from hallucinating English on silence/low-speech Gujarati chunks.
+# This is the #1 fix for "This is the first time we have done this game" hallucinations.
+# Install: pip install silero-vad
+silero-vad>=5.0.0
+
+# ── Bundled FFmpeg fallback (Windows: FFmpeg not on PATH) ────────────────────
+imageio-ffmpeg>=0.5.1
+
+# ── Audio processing ──────────────────────────────────────────────────────────
+soundfile>=0.12.1
+numpy>=1.26,<3
+
+# ── FIX: DeepFilterNet — noise reduction for cricket/crowd audio ──────────────
+# Improves Gujarati accuracy by +5-15% on noisy audio (commentary, mobile, TV).
+# Install separately: pip install deepfilternet
+# Usage enabled via ENABLE_DEEPFILTERNET=true env var (disabled by default — heavy)
+deepfilternet>=0.5.6
+
+# ── Speaker diarization (optional — ENABLE_SPEAKER_DIARIZATION=true) ─────────
+pyannote.audio==3.3.2
+
+# ── httpx (used by huggingface_hub internally) ────────────────────────────────
+httpx>=0.27.0

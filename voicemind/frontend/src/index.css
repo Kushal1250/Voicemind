@@ -1,0 +1,462 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Theme tokens — default = DARK mode values
+   html.dark   = explicit dark
+   html.light  = explicit light
+   html (no class) = system (inherits dark values, overridden below for light OS)
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --app-bg:        #020617;
+  --app-bg-alt:    #0f172a;
+  --app-surface:   rgba(15, 23, 42, 0.80);
+  --app-surface-s: rgba(15, 23, 42, 0.55);
+  --app-text:      #f1f5f9;
+  --app-text-muted:#94a3b8;
+  --app-border:    rgba(255,255,255,0.08);
+  --app-shell-bg:  #020617;
+  --grad-1: radial-gradient(circle at 15% 20%, rgba(79,70,229,0.16), transparent 28%),
+            radial-gradient(circle at 85% 10%, rgba(99,102,241,0.12), transparent 26%),
+            radial-gradient(circle at 50% 100%, rgba(34,197,94,0.08), transparent 35%);
+}
+
+/* Explicit dark class */
+html.dark {
+  color-scheme: dark;
+  --app-bg:        #020617;
+  --app-bg-alt:    #0f172a;
+  --app-surface:   rgba(15, 23, 42, 0.80);
+  --app-surface-s: rgba(15, 23, 42, 0.55);
+  --app-text:      #f1f5f9;
+  --app-text-muted:#94a3b8;
+  --app-border:    rgba(255,255,255,0.08);
+  --app-shell-bg:  #020617;
+  --grad-1: radial-gradient(circle at 15% 20%, rgba(79,70,229,0.16), transparent 28%),
+            radial-gradient(circle at 85% 10%, rgba(99,102,241,0.12), transparent 26%),
+            radial-gradient(circle at 50% 100%, rgba(34,197,94,0.08), transparent 35%);
+}
+
+/* Light mode — applied when html.light OR (no class + OS prefers light) */
+html.light {
+  color-scheme: light;
+  --app-bg:        #f8fafc;
+  --app-bg-alt:    #f1f5f9;
+  --app-surface:   rgba(255,255,255,0.90);
+  --app-surface-s: rgba(248,250,252,0.80);
+  --app-text:      #0f172a;
+  --app-text-muted:#475569;
+  --app-border:    rgba(15,23,42,0.10);
+  --app-shell-bg:  #f1f5f9;
+  --grad-1: radial-gradient(circle at 15% 20%, rgba(79,70,229,0.06), transparent 28%),
+            radial-gradient(circle at 85% 10%, rgba(99,102,241,0.05), transparent 26%),
+            radial-gradient(circle at 50% 100%, rgba(34,197,94,0.04), transparent 35%);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not(.dark) {
+    color-scheme: light;
+    --app-bg:        #f8fafc;
+    --app-bg-alt:    #f1f5f9;
+    --app-surface:   rgba(255,255,255,0.90);
+    --app-surface-s: rgba(248,250,252,0.80);
+    --app-text:      #0f172a;
+    --app-text-muted:#475569;
+    --app-border:    rgba(15,23,42,0.10);
+    --app-shell-bg:  #f1f5f9;
+    --grad-1: radial-gradient(circle at 15% 20%, rgba(79,70,229,0.06), transparent 28%),
+              radial-gradient(circle at 85% 10%, rgba(99,102,241,0.05), transparent 26%),
+              radial-gradient(circle at 50% 100%, rgba(34,197,94,0.04), transparent 35%);
+  }
+}
+
+html.light {
+  color-scheme: light;
+  --app-bg:        #f8fafc;
+  --app-bg-alt:    #f1f5f9;
+  --app-surface:   rgba(255,255,255,0.90);
+  --app-surface-s: rgba(248,250,252,0.80);
+  --app-text:      #0f172a;
+  --app-text-muted:#475569;
+  --app-border:    rgba(15,23,42,0.10);
+  --app-shell-bg:  #f1f5f9;
+  --grad-1: radial-gradient(circle at 15% 20%, rgba(79,70,229,0.06), transparent 28%),
+            radial-gradient(circle at 85% 10%, rgba(99,102,241,0.05), transparent 26%),
+            radial-gradient(circle at 50% 100%, rgba(34,197,94,0.04), transparent 35%);
+}
+
+@layer base {
+  * {
+    border-color: var(--app-border);
+  }
+
+  html {
+    font-family: Inter, "Noto Sans Gujarati", "Noto Sans Devanagari", "Noto Sans Bengali", "Noto Sans Tamil", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Malayalam", "Noto Sans Gurmukhi", "Noto Sans Arabic", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    scroll-behavior: smooth;
+    background-color: var(--app-bg);
+    color: var(--app-text);
+    transition: background-color 0.2s ease, color 0.2s ease;
+    overflow-x: clip;
+  }
+
+  body {
+    background-color: var(--app-bg);
+    background-image: var(--grad-1);
+    color: var(--app-text);
+    min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-height: 100vh;
+    overflow-x: clip;
+  }
+
+  img,
+  svg,
+  video,
+  canvas,
+  iframe {
+    max-width: 100%;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+  }
+
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  span,
+  td,
+  th,
+  label,
+  a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@layer components {
+  .app-shell-bg {
+    min-height: 100vh;
+    background-color: var(--app-shell-bg);
+    background-image: var(--grad-1);
+    color: var(--app-text);
+  }
+
+  .glass-panel {
+    @apply rounded-2xl backdrop-blur-xl shadow-2xl;
+    background-color: var(--app-surface);
+    border: 1px solid var(--app-border);
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15);
+  }
+
+  .surface-card {
+    @apply rounded-2xl backdrop-blur-xl shadow-lg;
+    background-color: var(--app-surface);
+    border: 1px solid var(--app-border);
+  }
+
+  .surface-card-soft {
+    @apply rounded-2xl backdrop-blur-md shadow-lg;
+    background-color: var(--app-surface-s);
+    border: 1px solid var(--app-border);
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl;
+  }
+  html.dark .card-hover:hover { border-color: rgba(59,130,246,0.4); box-shadow: 0 25px 50px -12px rgba(79,70,229,0.2); }
+  html.light .card-hover:hover { border-color: rgba(59,130,246,0.3); box-shadow: 0 25px 50px -12px rgba(59,130,246,0.12); }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-all duration-200 hover:bg-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-400;
+    border: 1px solid var(--app-border);
+    background-color: var(--app-surface-s);
+    color: var(--app-text);
+  }
+  .btn-secondary:hover {
+    background-color: var(--app-surface);
+  }
+
+  .input-field {
+    @apply w-full rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30 disabled:cursor-not-allowed disabled:opacity-60;
+    background-color: var(--app-bg);
+    border: 1px solid var(--app-border);
+    color: var(--app-text);
+  }
+  .input-field::placeholder { color: var(--app-text-muted); }
+  .input-field:focus { border-color: #3b82f6; }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200;
+    color: var(--app-text-muted);
+  }
+  .sidebar-link:hover {
+    background-color: var(--app-surface-s);
+    color: var(--app-text);
+  }
+
+  .sidebar-link.active {
+    @apply bg-gradient-to-r from-primary-600/20 to-primary-400/10 text-white ring-1 ring-primary-500/30;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .status-pill.online   { @apply border-green-500/20 bg-green-500/10 text-green-300; }
+  .status-pill.recording{ @apply border-red-500/20 bg-red-500/10 text-red-300 animate-pulse; }
+  .status-pill.idle     { @apply border-slate-600 bg-slate-800/80 text-slate-300; }
+  .status-pill.processing{ @apply border-amber-500/20 bg-amber-500/10 text-amber-300; }
+
+  .kpi-card {
+    @apply surface-card card-hover relative overflow-hidden p-5;
+  }
+  .kpi-card::before {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent;
+  }
+  html.light .kpi-card::before {
+    @apply via-black/10;
+  }
+
+  .section-title {
+    @apply text-2xl font-semibold tracking-tight;
+    color: var(--app-text);
+  }
+
+  .section-subtitle {
+    @apply mt-1 text-sm;
+    color: var(--app-text-muted);
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-xl;
+    background-color: var(--app-surface);
+  }
+
+  .waveform-bar {
+    @apply w-1 rounded-full bg-primary-400 animate-wave;
+  }
+
+  .transcript-highlight {
+    @apply rounded-md bg-amber-400/20 px-1 py-0.5 text-amber-200;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 163, 184, 0.35);
+    border-radius: 9999px;
+  }
+
+  .text-balance { text-wrap: balance; }
+
+  .safe-mobile-pad {
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+}
+
+@media (max-width: 639px) {
+  .section-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+
+  .glass-panel,
+  .surface-card,
+  .surface-card-soft,
+  .kpi-card {
+    border-radius: 1.25rem;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    min-height: 2.75rem;
+  }
+
+  .sidebar-link {
+    min-height: 3rem;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LIGHT MODE GLOBAL OVERRIDES
+   These flip hardcoded dark Tailwind classes when html.light (or OS light).
+   Using html.light > * specificity beats the Tailwind utility specificity.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+html.light,
+html:not(.dark):not(.light) {
+  /* body-level overrides */
+  background-color: var(--app-bg) !important;
+  color: var(--app-text) !important;
+}
+
+/* Backgrounds */
+html.light .bg-slate-950,
+html.light .bg-slate-950\/70,
+html.light .bg-slate-950\/95,
+html.light .bg-slate-950\/60 { background-color: var(--app-bg) !important; }
+
+html.light .bg-slate-900,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/55,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/85 { background-color: var(--app-surface) !important; }
+
+html.light .bg-white\/5  { background-color: rgba(15,23,42,0.04) !important; }
+html.light .bg-white\/10 { background-color: rgba(15,23,42,0.08) !important; }
+html.light .bg-white\/20 { background-color: rgba(15,23,42,0.12) !important; }
+html.light .bg-black\/10 { background-color: rgba(15,23,42,0.04) !important; }
+
+/* Text */
+html.light .text-white          { color: #0f172a !important; }
+html.light .text-slate-100      { color: #1e293b !important; }
+html.light .text-slate-200      { color: #334155 !important; }
+html.light .text-slate-300      { color: #475569 !important; }
+html.light .text-slate-400      { color: #64748b !important; }
+html.light .text-slate-500      { color: #94a3b8 !important; }
+
+/* Borders */
+html.light .border-white\/10 { border-color: rgba(15,23,42,0.10) !important; }
+html.light .border-white\/20 { border-color: rgba(15,23,42,0.16) !important; }
+html.light .border-white\/5  { border-color: rgba(15,23,42,0.06) !important; }
+
+/* Hover states - keep borders visible on hover */
+html.light .hover\:bg-white\/5:hover  { background-color: rgba(15,23,42,0.05) !important; }
+html.light .hover\:bg-white\/10:hover { background-color: rgba(15,23,42,0.08) !important; }
+html.light .hover\:text-white:hover   { color: #0f172a !important; }
+html.light .hover\:border-white\/20:hover { border-color: rgba(15,23,42,0.16) !important; }
+
+/* AppShell */
+html.light .app-shell-bg {
+  background-color: var(--app-shell-bg) !important;
+  color: var(--app-text) !important;
+}
+
+/* Cards */
+html.light .glass-panel {
+  background-color: rgba(255,255,255,0.9) !important;
+  border-color: rgba(15,23,42,0.10) !important;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08) !important;
+}
+html.light .surface-card {
+  background-color: rgba(255,255,255,0.85) !important;
+  border-color: rgba(15,23,42,0.10) !important;
+}
+html.light .surface-card-soft {
+  background-color: rgba(248,250,252,0.8) !important;
+  border-color: rgba(15,23,42,0.08) !important;
+}
+
+/* Inputs */
+html.light .input-field {
+  background-color: #fff !important;
+  border-color: rgba(15,23,42,0.15) !important;
+  color: #0f172a !important;
+}
+
+/* Sidebar link */
+html.light .sidebar-link { color: #475569 !important; }
+html.light .sidebar-link:hover { background-color: rgba(15,23,42,0.06) !important; color: #0f172a !important; }
+
+/* Scrollbar */
+html.light .scrollbar-thin {
+  scrollbar-color: rgba(15,23,42,0.25) transparent;
+}
+
+/* Notification panel and dropdowns */
+html.light [class*="bg-slate-950"] {
+  background-color: #fff !important;
+}
+
+/* Section titles */
+html.light .section-title { color: #0f172a !important; }
+html.light .section-subtitle { color: #64748b !important; }
+
+/* Skeleton */
+html.light .skeleton { background-color: rgba(15,23,42,0.08) !important; }
+
+/* btn-secondary */
+html.light .btn-secondary {
+  background-color: rgba(15,23,42,0.05) !important;
+  border-color: rgba(15,23,42,0.12) !important;
+  color: #1e293b !important;
+}
+html.light .btn-secondary:hover {
+  background-color: rgba(15,23,42,0.10) !important;
+}
+
+/* System mode light — same overrides but scoped to OS preference */
+@media (prefers-color-scheme: light) {
+  html:not(.dark):not(.light) {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+  }
+  html:not(.dark):not(.light) .bg-slate-950,
+  html:not(.dark):not(.light) .bg-slate-950\/70,
+  html:not(.dark):not(.light) .bg-slate-950\/95,
+  html:not(.dark):not(.light) .bg-slate-950\/60 { background-color: #f8fafc !important; }
+
+  html:not(.dark):not(.light) .bg-slate-900,
+  html:not(.dark):not(.light) .bg-slate-900\/80,
+  html:not(.dark):not(.light) .bg-slate-900\/55 { background-color: rgba(255,255,255,0.85) !important; }
+
+  html:not(.dark):not(.light) .text-white     { color: #0f172a !important; }
+  html:not(.dark):not(.light) .text-slate-100 { color: #1e293b !important; }
+  html:not(.dark):not(.light) .text-slate-200 { color: #334155 !important; }
+  html:not(.dark):not(.light) .text-slate-300 { color: #475569 !important; }
+  html:not(.dark):not(.light) .text-slate-400 { color: #64748b !important; }
+  html:not(.dark):not(.light) .text-slate-500 { color: #94a3b8 !important; }
+
+  html:not(.dark):not(.light) .border-white\/10 { border-color: rgba(15,23,42,0.10) !important; }
+  html:not(.dark):not(.light) .border-white\/20 { border-color: rgba(15,23,42,0.16) !important; }
+
+  html:not(.dark):not(.light) .app-shell-bg {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+  }
+  html:not(.dark):not(.light) .glass-panel {
+    background-color: rgba(255,255,255,0.9) !important;
+    border-color: rgba(15,23,42,0.10) !important;
+  }
+  html:not(.dark):not(.light) .surface-card {
+    background-color: rgba(255,255,255,0.85) !important;
+    border-color: rgba(15,23,42,0.10) !important;
+  }
+  html:not(.dark):not(.light) .surface-card-soft {
+    background-color: rgba(248,250,252,0.8) !important;
+    border-color: rgba(15,23,42,0.08) !important;
+  }
+  html:not(.dark):not(.light) .input-field {
+    background-color: #fff !important;
+    border-color: rgba(15,23,42,0.15) !important;
+    color: #0f172a !important;
+  }
+  html:not(.dark):not(.light) .section-title  { color: #0f172a !important; }
+  html:not(.dark):not(.light) .section-subtitle { color: #64748b !important; }
+}

@@ -1,0 +1,860 @@
+// frontend/src/hooks/useLiveStatus.js
+
+import { useCallback, useEffect, useRef } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { toast } from 'react-toastify';
+import api, { silentRequestConfig } from '../services/api';
+import {
+  addTimelineEvent,
+  clearActiveMeeting,
+  clearConnection,
+  deriveChunkProgress,
+  hydrateActiveMeeting,
+  hydrateLiveSnapshot,
+  beginDashboardLiveSession,
+  clearDashboardLiveSession,
+  setConnected,
+  setConnectionMode,
+  setRecordingStartTime,
+  setTranscript,
+  updateChunksProgress,
+  updateDeviceStatus,
+  updateMeetingStatus,
+  isMeetingFinished,
+  isMeetingLiveOrRecoverable,
+  normalizeMeetingStatus,
+} from '../store/slices/liveStatusSlice';
+import { updateMeetingStatus as updateMeetingStatusAction } from '../store/slices/meetingsSlice';
+import { addNotification, setConnectionStatus } from '../store/slices/notificationsSlice';
+import { updateTranscript } from '../store/slices/transcriptsSlice';
+import { normalizeTranscriptEventPayload } from '../utils/transcriptTurns';
+
+const SSE_URL = process.env.REACT_APP_SSE_URL || 'http://localhost:5001/api/events';
+const ACTIVE_WEB_MEETING_KEY = 'voicemind_active_web_meeting_id';
+const ACTIVE_LIVE_MEETING_KEY = 'voicemind_active_live_meeting_id';
+const ACTIVE_LIVE_MEETING_UPDATED_AT_KEY = 'voicemind_active_live_meeting_updated_at';
+const ACTIVE_MEETING_RESTORE_TTL_MS = 6 * 60 * 60 * 1000;
+const POLL_INTERVAL_MS = 5000;
+
+const SSE_EVENTS = [
+  'connection',
+  'live_snapshot',
+  'device_online',
+  'device_offline',
+  'recording_started',
+  'recording_stopped',
+  'chunk_uploaded',
+  'chunk_processing_started',
+  'chunk_transcribed',
+  'chunk_rejected',
+  'chunk_failed',
+  'transcript_updated',
+  'summary_updated',
+  'meeting_status_changed',
+  'meeting_finalized',
+  'system_warning',
+  'system_error',
+  'ping',
+];
+
+const getStoredMeetingId = () => {
+  if (typeof window === 'undefined') return null;
+
+  const localValue = window.localStorage.getItem(ACTIVE_LIVE_MEETING_KEY);
+  const sessionValue = window.sessionStorage.getItem(ACTIVE_WEB_MEETING_KEY);
+  const timestamp = Number(window.localStorage.getItem(ACTIVE_LIVE_MEETING_UPDATED_AT_KEY) || 0);
+
+  if (localValue && timestamp && Date.now() - timestamp <= ACTIVE_MEETING_RESTORE_TTL_MS) {
+    return localValue;
+  }
+
+  return sessionValue || localValue || null;
+};
+
+const persistMeetingId = (meetingId) => {
+  if (typeof window === 'undefined' || !meetingId) return;
+  window.localStorage.setItem(ACTIVE_LIVE_MEETING_KEY, String(meetingId));
+  window.localStorage.setItem(ACTIVE_LIVE_MEETING_UPDATED_AT_KEY, String(Date.now()));
+};
+
+const clearStoredMeetingId = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(ACTIVE_LIVE_MEETING_KEY);
+  window.localStorage.removeItem(ACTIVE_LIVE_MEETING_UPDATED_AT_KEY);
+  window.sessionStorage.removeItem(ACTIVE_WEB_MEETING_KEY);
+};
+
+const getMeetingStatus = (meeting) => normalizeMeetingStatus(meeting?.status || meeting?.processingStatus);
+
+const shouldRetainMeeting = (meeting) => {
+  if (!meeting) return false;
+  const status = getMeetingStatus(meeting);
+  return isMeetingLiveOrRecoverable(status) || Boolean(deriveChunkProgress(meeting).hasAnyStats);
+};
+
+const chooseActiveMeetingFromList = (payload) => {
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.meetings)
+      ? payload.meetings
+      : Array.isArray(payload)
+        ? payload
+        : [];
+
+  const ordered = [...items].sort((left, right) => {
+    const leftTime = new Date(left?.updatedAt || left?.createdAt || 0).getTime();
+    const rightTime = new Date(right?.updatedAt || right?.createdAt || 0).getTime();
+    return rightTime - leftTime;
+  });
+
+  const live = ordered.find((meeting) => isMeetingLiveOrRecoverable(getMeetingStatus(meeting)));
+  if (live) return live;
+
+  return ordered.find((meeting) => deriveChunkProgress(meeting).hasAnyStats) || null;
+};
+
+export const useLiveStatus = () => {
+  const dispatch = useDispatch();
+
+  const { activeMeetingStatus, activeDeviceStatus, connectionMode, activeMeetingId } = useSelector(
+    (state) => state.liveStatus,
+  );
+  const { user, isAuthenticated } = useSelector((state) => state.auth);
+
+  const eventSourceRef = useRef(null);
+  const pollingIntervalRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const networkIssueShownRef = useRef(false);
+  const restoreInFlightRef = useRef(null);
+
+  const activeMeetingStatusRef = useRef(activeMeetingStatus);
+  const activeDeviceStatusRef = useRef(activeDeviceStatus);
+  const activeMeetingIdRef = useRef(activeMeetingId);
+  const authRef = useRef(isAuthenticated);
+  const userRef = useRef(user);
+
+  useEffect(() => {
+    activeMeetingStatusRef.current = activeMeetingStatus;
+  }, [activeMeetingStatus]);
+
+  useEffect(() => {
+    activeDeviceStatusRef.current = activeDeviceStatus;
+  }, [activeDeviceStatus]);
+
+  useEffect(() => {
+    activeMeetingIdRef.current = activeMeetingId;
+  }, [activeMeetingId]);
+
+  useEffect(() => {
+    authRef.current = isAuthenticated;
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const markNetworkRecovered = useCallback(() => {
+    networkIssueShownRef.current = false;
+  }, []);
+
+  const notifyNetworkIssueOnce = useCallback(() => {
+    if (networkIssueShownRef.current) return;
+
+    networkIssueShownRef.current = true;
+
+    const toastId = 'voicemind-network-error';
+    if (!toast.isActive(toastId)) {
+      toast.error('Network error. Please check your connection.', { toastId });
+    }
+
+    dispatch(
+      addNotification({
+        type: 'system',
+        severity: 'warning',
+        title: 'Network Error',
+        message: 'Connection lost. Please check your network or backend server.',
+        dedupeKey: 'network-error-global',
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }, [dispatch]);
+
+  const syncMeetingStorage = useCallback((meeting) => {
+    if (shouldRetainMeeting(meeting)) {
+      persistMeetingId(meeting.meetingId || meeting._id);
+      return;
+    }
+
+    if (!meeting || isMeetingFinished(meeting.status)) {
+      clearStoredMeetingId();
+    }
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
+
+  const closeEventSource = useCallback(() => {
+    if (eventSourceRef.current) {
+      try {
+        eventSourceRef.current.close();
+      } catch (_error) {
+        // ignore
+      }
+      eventSourceRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  }, []);
+
+  const applyHydratedMeeting = useCallback((meeting, devices = []) => {
+    if (!meeting) {
+      clearStoredMeetingId();
+      dispatch(clearActiveMeeting());
+      return null;
+    }
+
+    syncMeetingStorage(meeting);
+    dispatch(hydrateActiveMeeting({ meeting, devices }));
+
+    const transcriptPayload = normalizeTranscriptEventPayload({
+      meetingId: meeting.meetingId,
+      ...(meeting.transcript || {}),
+      chunksUploaded: meeting?.stats?.chunksUploaded,
+      chunksCompleted30s: meeting?.stats?.chunksCompleted30s,
+      hasFinalPartialChunk: meeting?.stats?.hasFinalPartialChunk,
+      durationSecTotal: meeting?.stats?.durationSec,
+    });
+
+    dispatch(updateTranscript(transcriptPayload));
+    dispatch(setTranscript(transcriptPayload));
+
+    dispatch(
+      updateMeetingStatusAction({
+        meetingId: meeting.meetingId,
+        status: meeting.status,
+      }),
+    );
+
+    return meeting;
+  }, [dispatch, syncMeetingStorage]);
+
+  const restoreActiveMeeting = useCallback(async () => {
+    if (!authRef.current || !userRef.current) return null;
+    if (restoreInFlightRef.current) return restoreInFlightRef.current;
+
+    restoreInFlightRef.current = (async () => {
+      const candidateId = activeMeetingIdRef.current || activeMeetingStatusRef.current?.meetingId || getStoredMeetingId();
+
+      if (candidateId) {
+        try {
+          const meetingResponse = await api.get(`/meetings/${candidateId}`, silentRequestConfig);
+          const meeting = meetingResponse?.data?.data || null;
+
+          if (meeting && shouldRetainMeeting(meeting)) {
+            return applyHydratedMeeting(meeting);
+          }
+
+          clearStoredMeetingId();
+        } catch (error) {
+          if (error?.response?.status === 404) {
+            clearStoredMeetingId();
+          }
+        }
+      }
+
+      try {
+        const [meetingsResponse, devicesResponse] = await Promise.all([
+          api.get('/meetings', {
+            ...silentRequestConfig,
+            params: { limit: 10, sort: '-updatedAt' },
+          }),
+          api.get('/devices', silentRequestConfig).catch(() => null),
+        ]);
+
+        const meeting = chooseActiveMeetingFromList(meetingsResponse?.data?.data || meetingsResponse?.data);
+        const devices = devicesResponse?.data?.data?.items || devicesResponse?.data?.data || devicesResponse?.data || [];
+
+        if (meeting) {
+          try {
+            const detailResponse = await api.get(`/meetings/${meeting.meetingId || meeting._id}`, silentRequestConfig);
+            return applyHydratedMeeting(detailResponse?.data?.data || meeting, devices);
+          } catch (_detailError) {
+            return applyHydratedMeeting(meeting, devices);
+          }
+        }
+
+        dispatch(clearActiveMeeting());
+        clearStoredMeetingId();
+        return null;
+      } catch (_error) {
+        return null;
+      }
+    })();
+
+    try {
+      return await restoreInFlightRef.current;
+    } finally {
+      restoreInFlightRef.current = null;
+    }
+  }, [applyHydratedMeeting, dispatch]);
+
+  const handleSSEEvent = useCallback(
+    (type, payload = {}) => {
+      if (type !== 'ping') {
+        dispatch(setConnected(true));
+        dispatch(setConnectionMode('realtime'));
+        dispatch(setConnectionStatus('connected'));
+        markNetworkRecovered();
+      }
+
+      switch (type) {
+        case 'connection': {
+          dispatch(setConnected(true));
+          dispatch(setConnectionMode(payload.mode === 'LIVE' ? 'realtime' : 'polling'));
+          dispatch(setConnectionStatus('connected'));
+          markNetworkRecovered();
+          void restoreActiveMeeting();
+          break;
+        }
+
+        case 'live_snapshot': {
+          dispatch(hydrateLiveSnapshot(payload));
+
+          const activeMeeting = payload?.activeMeeting || null;
+          syncMeetingStorage(activeMeeting);
+
+          if (activeMeeting) {
+            dispatch(
+              updateMeetingStatusAction({
+                meetingId: activeMeeting.meetingId,
+                status: activeMeeting.status,
+              }),
+            );
+
+            if (activeMeeting?.transcript) {
+              const transcriptPayload = normalizeTranscriptEventPayload({
+                meetingId: activeMeeting.meetingId,
+                ...activeMeeting.transcript,
+                chunksUploaded: activeMeeting?.stats?.chunksUploaded,
+                chunksCompleted30s: activeMeeting?.stats?.chunksCompleted30s,
+                hasFinalPartialChunk: activeMeeting?.stats?.hasFinalPartialChunk,
+                durationSecTotal: activeMeeting?.stats?.durationSec,
+              });
+              dispatch(updateTranscript(transcriptPayload));
+              dispatch(setTranscript(transcriptPayload));
+            }
+          } else {
+            dispatch(setTranscript({ fullText: '' }));
+            dispatch(clearDashboardLiveSession());
+            clearStoredMeetingId();
+          }
+
+          break;
+        }
+
+        case 'device_online': {
+          dispatch(
+            updateDeviceStatus({
+              deviceId: payload.deviceId,
+              name: payload.name || payload.deviceId,
+              status: 'online',
+              telemetry: payload.telemetry || {},
+              lastSeenAt: payload.lastSeenAt || new Date().toISOString(),
+              currentMeetingId: payload.currentMeetingId || null,
+            }),
+          );
+          dispatch(
+            addNotification({
+              type: 'device',
+              severity: 'info',
+              title: 'Device Online',
+              message: `Device ${payload.deviceId || payload.name || 'Unknown device'} is online.`,
+              deviceId: payload.deviceId,
+              dedupeKey: `device-online-${payload.deviceId || 'unknown'}`,
+              createdAt: payload.lastSeenAt || new Date().toISOString(),
+            }),
+          );
+          break;
+        }
+
+        case 'device_offline': {
+          dispatch(
+            updateDeviceStatus({
+              deviceId: payload.deviceId,
+              status: 'offline',
+              lastSeenAt: payload.lastSeenAt || new Date().toISOString(),
+            }),
+          );
+
+          dispatch(
+            addNotification({
+              type: 'device',
+              severity: 'warning',
+              title: 'Device Offline',
+              message: `Device ${payload.deviceId || 'Unknown device'} went offline.`,
+              deviceId: payload.deviceId,
+              dedupeKey: `device-offline-${payload.deviceId || 'unknown'}`,
+              createdAt: payload.lastSeenAt || new Date().toISOString(),
+            }),
+          );
+
+          toast.warning(`Device ${payload.deviceId} went offline`, {
+            toastId: `device-offline-${payload.deviceId}`,
+          });
+          break;
+        }
+
+        case 'recording_started': {
+          const startedAt = payload.startTime || new Date().toISOString();
+          persistMeetingId(payload.meetingId);
+
+          dispatch(
+            updateMeetingStatus({
+              meetingId: payload.meetingId,
+              deviceId: payload.deviceId,
+              source: payload.source || 'esp32',
+              status: 'recording',
+              startTime: startedAt,
+              endTime: null,
+            }),
+          );
+
+          dispatch(
+            beginDashboardLiveSession({
+              meetingId: payload.meetingId,
+              source: payload.source || 'esp32',
+              startedAt,
+            }),
+          );
+
+          dispatch(
+            updateMeetingStatusAction({
+              meetingId: payload.meetingId,
+              status: 'recording',
+            }),
+          );
+
+          dispatch(setRecordingStartTime(startedAt));
+
+          dispatch(
+            addTimelineEvent({
+              type: 'recording_started',
+              message: 'Recording started',
+              data: payload,
+            }),
+          );
+
+          dispatch(
+            addNotification({
+              type: 'meeting',
+              severity: 'info',
+              title: 'Recording Started',
+              message: 'Meeting recording started',
+              meetingId: payload.meetingId,
+              deviceId: payload.deviceId,
+              dedupeKey: `recording-started-${payload.meetingId}`,
+              createdAt: startedAt,
+            }),
+          );
+
+          break;
+        }
+
+        case 'recording_stopped': {
+          persistMeetingId(payload.meetingId);
+
+          dispatch(
+            updateMeetingStatus({
+              meetingId: payload.meetingId,
+              status: 'processing',
+              endTime: payload.endTime || new Date().toISOString(),
+              durationSec: Number(payload.duration || 0),
+            }),
+          );
+
+          dispatch(
+            updateMeetingStatusAction({
+              meetingId: payload.meetingId,
+              status: 'processing',
+            }),
+          );
+
+          dispatch(
+            addTimelineEvent({
+              type: 'recording_stopped',
+              message: 'Recording stopped',
+              data: payload,
+            }),
+          );
+
+          dispatch(
+            addNotification({
+              type: 'meeting',
+              severity: payload.reason === 'device_offline' ? 'warning' : 'info',
+              title: payload.reason === 'device_offline' ? 'Meeting Stopped Unexpectedly' : 'Meeting Stopped',
+              message:
+                payload.reason === 'device_offline'
+                  ? `Meeting ${payload.meetingId || 'Unknown'} stopped because the device went offline.`
+                  : `Recording stopped for meeting ${payload.meetingId || 'Unknown'}.`,
+              meetingId: payload.meetingId,
+              deviceId: payload.deviceId,
+              dedupeKey: `recording-stopped-${payload.meetingId || 'unknown'}-${payload.reason || 'manual'}`,
+              createdAt: payload.endTime || new Date().toISOString(),
+            }),
+          );
+
+          break;
+        }
+
+        case 'chunk_uploaded': {
+          persistMeetingId(payload.meetingId);
+
+          dispatch(updateChunksProgress(payload));
+
+          if (payload.durationSecTotal !== undefined) {
+            dispatch(
+              updateMeetingStatus({
+                meetingId: payload.meetingId,
+                durationSec: Number(payload.durationSecTotal || 0),
+              }),
+            );
+          }
+
+          dispatch(
+            addTimelineEvent({
+              type: 'chunk_uploaded',
+              message: `Chunk ${payload.chunkIndex} uploaded`,
+              data: payload,
+            }),
+          );
+
+          break;
+        }
+
+        case 'chunk_processing_started': {
+          persistMeetingId(payload.meetingId);
+          dispatch(updateChunksProgress({ ...payload, status: 'processing' }));
+          dispatch(addTimelineEvent({ type: 'chunk_processing_started', message: `Chunk ${payload.chunkIndex} processing`, data: payload }));
+          break;
+        }
+
+        case 'chunk_transcribed': {
+          persistMeetingId(payload.meetingId);
+          dispatch(updateChunksProgress({ ...payload, processed: Number(payload.chunkIndex || 0) + 1 }));
+          if (payload.conversation_text || payload.text) {
+            dispatch(setTranscript({
+              meetingId: payload.meetingId,
+              fullText: payload.conversation_text || payload.text,
+              rawFullText: payload.conversation_text || payload.text,
+              processingStatus: 'partial',
+            }));
+          }
+          dispatch(addTimelineEvent({ type: 'chunk_transcribed', message: `Chunk ${payload.chunkIndex} transcribed`, data: payload }));
+          break;
+        }
+
+        case 'chunk_rejected': {
+          persistMeetingId(payload.meetingId);
+          dispatch(updateChunksProgress({ ...payload, failed: Number(payload.failed || payload.chunksFailed || 1) }));
+          dispatch(addTimelineEvent({ type: 'chunk_rejected', message: `Chunk ${payload.chunkIndex} rejected`, data: payload }));
+          break;
+        }
+
+        case 'chunk_failed': {
+          persistMeetingId(payload.meetingId);
+          dispatch(updateChunksProgress(payload));
+
+          dispatch(
+            addTimelineEvent({
+              type: 'chunk_failed',
+              message: `Chunk ${payload.chunkIndex} failed`,
+              data: payload,
+            }),
+          );
+
+          toast.error(`Chunk upload failed: ${payload.error || 'Unknown error'}`, {
+            toastId: `chunk-failed-${payload.meetingId}-${payload.chunkIndex}`,
+          });
+          break;
+        }
+
+        case 'transcript_updated': {
+          const transcriptPayload = normalizeTranscriptEventPayload(payload);
+          dispatch(updateTranscript(transcriptPayload));
+          dispatch(setTranscript(transcriptPayload));
+          if (payload.meetingId) persistMeetingId(payload.meetingId);
+          break;
+        }
+
+        case 'meeting_finalized': {
+          dispatch(updateMeetingStatus({ meetingId: payload.meetingId, status: payload.status || 'completed' }));
+          dispatch(updateMeetingStatusAction({ meetingId: payload.meetingId, status: payload.status || 'completed' }));
+          if (payload.visible === false || payload.status === 'cancelled_short') {
+            clearStoredMeetingId();
+            dispatch(clearDashboardLiveSession());
+            dispatch(clearActiveMeeting());
+          }
+          dispatch(addTimelineEvent({ type: 'meeting_finalized', message: payload.message || 'Meeting finalized', data: payload }));
+          break;
+        }
+
+        case 'meeting_status_changed': {
+          dispatch(
+            updateMeetingStatus({
+              meetingId: payload.meetingId,
+              status: payload.status,
+            }),
+          );
+
+          dispatch(
+            updateMeetingStatusAction({
+              meetingId: payload.meetingId,
+              status: payload.status,
+            }),
+          );
+
+          if (isMeetingFinished(payload.status)) {
+            if (payload.meetingId && activeMeetingStatusRef.current?.meetingId === payload.meetingId) {
+              dispatch(clearDashboardLiveSession());
+            }
+
+            void restoreActiveMeeting().then((meeting) => {
+              if (!meeting) clearStoredMeetingId();
+            });
+          } else if (payload.meetingId) {
+            persistMeetingId(payload.meetingId);
+          }
+
+          dispatch(
+            addNotification({
+              type: 'meeting',
+              severity: String(payload.status || '').toLowerCase() === 'processing' ? 'info' : 'success',
+              title: 'Meeting Status Updated',
+              message:
+                String(payload.status || '').toLowerCase() === 'processing'
+                  ? `Transcript processing started for meeting ${payload.meetingId || 'Unknown'}.`
+                  : `Meeting ${payload.meetingId || 'Unknown'} is now ${payload.status || 'updated'}.`,
+              meetingId: payload.meetingId,
+              dedupeKey: `meeting-status-${payload.meetingId || 'unknown'}-${payload.status || 'unknown'}`,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+          break;
+        }
+
+        default:
+          break;
+      }
+    },
+    [dispatch, markNetworkRecovered, restoreActiveMeeting, syncMeetingStorage],
+  );
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    dispatch(setConnectionMode('polling'));
+    dispatch(setConnectionStatus('polling'));
+
+    const poll = async () => {
+      const currentMeeting = activeMeetingStatusRef.current;
+      const device = activeDeviceStatusRef.current;
+      const storedMeetingId = getStoredMeetingId();
+
+      try {
+        const healthResponse = await api.get('/health', silentRequestConfig);
+        const ok = Boolean(healthResponse?.data?.success || healthResponse?.data?.server === 'ok');
+
+        dispatch(setConnected(ok));
+
+        if (ok) {
+          dispatch(setConnectionMode('polling'));
+          dispatch(setConnectionStatus('polling'));
+          markNetworkRecovered();
+        }
+
+        if (device?.deviceId) {
+          try {
+            const deviceResponse = await api.get(`/devices/${device.deviceId}/status`, silentRequestConfig);
+            const deviceData = deviceResponse?.data?.data;
+
+            if (deviceData) {
+              dispatch(
+                updateDeviceStatus({
+                  deviceId: deviceData.deviceId,
+                  name: deviceData.name,
+                  status: deviceData.status,
+                  telemetry: deviceData.telemetry || {},
+                  lastSeenAt: deviceData.lastSeenAt || new Date().toISOString(),
+                  currentMeetingId: deviceData.currentMeeting?.meetingId || null,
+                }),
+              );
+
+              if (deviceData.currentMeeting) {
+                const meetingLike = {
+                  ...deviceData.currentMeeting,
+                  deviceId: deviceData.deviceId,
+                  stats: deviceData.currentMeeting.stats || {
+                    chunksUploaded: deviceData.currentMeeting.chunksUploaded,
+                    chunksTotal: deviceData.currentMeeting.chunksTotal,
+                    chunksCompleted30s: deviceData.currentMeeting.chunksCompleted30s,
+                    hasFinalPartialChunk: deviceData.currentMeeting.hasFinalPartialChunk,
+                    chunksFailed: deviceData.currentMeeting.failedChunkCount,
+                  },
+                };
+
+                applyHydratedMeeting(meetingLike, [deviceData]);
+                return;
+              }
+            }
+          } catch (_error) {
+            // silent background polling error
+          }
+        }
+
+        const meetingIdToFetch = currentMeeting?.meetingId || storedMeetingId;
+        if (meetingIdToFetch) {
+          try {
+            const meetingResponse = await api.get(`/meetings/${meetingIdToFetch}`, silentRequestConfig);
+            const meetingData = meetingResponse?.data?.data;
+
+            if (meetingData && shouldRetainMeeting(meetingData)) {
+              applyHydratedMeeting(meetingData);
+              return;
+            }
+
+            clearStoredMeetingId();
+          } catch (error) {
+            if (error?.response?.status === 404) {
+              clearStoredMeetingId();
+            }
+          }
+        }
+
+        await restoreActiveMeeting();
+      } catch (_error) {
+        dispatch(setConnected(false));
+        notifyNetworkIssueOnce();
+      }
+    };
+
+    void poll();
+
+    pollingIntervalRef.current = setInterval(() => {
+      void poll();
+    }, POLL_INTERVAL_MS);
+  }, [applyHydratedMeeting, dispatch, markNetworkRecovered, notifyNetworkIssueOnce, restoreActiveMeeting, stopPolling]);
+
+  const initSSE = useCallback(() => {
+    if (!authRef.current || !userRef.current) return;
+    if (eventSourceRef.current) return;
+
+    stopPolling();
+    dispatch(setConnectionStatus('connecting'));
+    void restoreActiveMeeting();
+
+    try {
+      const es = new EventSource(SSE_URL);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        dispatch(setConnected(true));
+        dispatch(setConnectionMode('realtime'));
+        dispatch(setConnectionStatus('connected'));
+        markNetworkRecovered();
+      };
+
+      SSE_EVENTS.forEach((eventName) => {
+        es.addEventListener(eventName, (event) => {
+          try {
+            const payload = event?.data ? JSON.parse(event.data) : {};
+            handleSSEEvent(eventName, payload);
+          } catch (error) {
+            console.error(`Failed to parse SSE ${eventName}:`, error);
+          }
+        });
+      });
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data?.type) {
+            handleSSEEvent(data.type, data.payload || {});
+          }
+        } catch (_error) {
+          // ignore generic non-json message
+        }
+      };
+
+      es.onerror = () => {
+        closeEventSource();
+        dispatch(setConnected(false));
+        dispatch(setConnectionMode('polling'));
+        dispatch(setConnectionStatus('polling'));
+        notifyNetworkIssueOnce();
+        startPolling();
+
+        clearReconnectTimer();
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (authRef.current && userRef.current && !eventSourceRef.current) {
+            initSSE();
+          }
+        }, 5000);
+      };
+    } catch (error) {
+      console.error('Failed to create SSE:', error);
+      dispatch(setConnected(false));
+      dispatch(setConnectionMode('polling'));
+      dispatch(setConnectionStatus('polling'));
+      notifyNetworkIssueOnce();
+      startPolling();
+    }
+  }, [
+    clearReconnectTimer,
+    closeEventSource,
+    dispatch,
+    handleSSEEvent,
+    markNetworkRecovered,
+    notifyNetworkIssueOnce,
+    restoreActiveMeeting,
+    startPolling,
+    stopPolling,
+  ]);
+
+  const cleanup = useCallback(() => {
+    clearReconnectTimer();
+    closeEventSource();
+    stopPolling();
+    dispatch(clearConnection());
+    dispatch(setConnectionStatus('disconnected'));
+  }, [clearReconnectTimer, closeEventSource, dispatch, stopPolling]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      cleanup();
+      return;
+    }
+
+    initSSE();
+
+    return () => {
+      cleanup();
+    };
+  }, [isAuthenticated, user, initSSE, cleanup]);
+
+  return {
+    initSSE,
+    cleanup,
+    connectionMode,
+    restoreActiveMeeting,
+  };
+};
+
+export default useLiveStatus;
