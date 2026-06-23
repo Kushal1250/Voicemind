@@ -1,0 +1,13 @@
+node_modules/
+venv/
+.env
+
+frontend/node_modules/
+backend/node_modules/
+
+python_services/transcription_service/venv/
+python_services/qa_service/venv/
+
+*.zip
+.DS_Store
+.vscode/
